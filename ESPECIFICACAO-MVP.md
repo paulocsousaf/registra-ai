@@ -324,9 +324,9 @@ A seleção de tecnologia foi balizada pelo menor tempo de desenvolvimento (*Tim
 
 | Componente | Tecnologia Escolhida | Justificativa Arquitetural |
 | :--- | :--- | :--- |
-| **Gateway WhatsApp** | **Evolution API** (Self-hosted) ou **Z-API** | Permite integração rápida via Webhooks HTTP e envio via REST sem burocracia de aprovação de templates corporativos da Meta no período de teste inicial. |
-| **Backend Framework** | **TypeScript + Node.js (Fastify)** *ou* **Python (FastAPI)** | I/O assíncrono de alta performance para gerenciar webhooks simultâneos com baixíssima latência e validação robusta de tipos (Zod / Pydantic). |
+| **Gateway WhatsApp** | **Evolution API** (Self-hosted) | Permite integração rápida via Webhooks HTTP e envio via REST sem burocracia de aprovação de templates corporativos da Meta no período de teste inicial. |
+| **Backend Framework** | **TypeScript + Node.js (Fastify)** *| I/O assíncrono de alta performance para gerenciar webhooks simultâneos com baixíssima latência e validação robusta de tipos (Zod / Pydantic). |
 | **Motor de Extração** | **Expressões Regulares (Regex) + LLM Fallback (Gemini 1.5 Flash)** | Pipeline em 2 estágios: 80% das mensagens comuns são resolvidas em menos de 10ms via Regex local a custo zero. Mensagens ambíguas caem na LLM leve com chamada estruturada (JSON mode). |
-| **Banco de Dados** | **PostgreSQL 15+** | Confiabilidade ACID para operações financeiras, integridade referencial nativa e suporte a tipos numéricos precisos (`DECIMAL(10,2)`). |
-| **Camada de Acesso a Dados** | **Prisma ORM** (Node.js) ou **SQLAlchemy / SQLModel** (Python) | Migrações seguras e geração de schemas tipados para velocidade de desenvolvimento sem SQL manual vulnerável. |
-| **Hospedagem & Infra** | **Render / Railway / VPS Dockerizada** | Deploy contínuo simplificado a partir do Git, com separação de ambientes de *Staging* e *Production*. |
+| **Banco de Dados** | **Supabase PostgreSQL 15+** | Confiabilidade ACID para operações financeiras, integridade referencial nativa e suporte a tipos numéricos precisos (`DECIMAL(10,2)`). |
+| **Camada de Acesso a Dados** | **Prisma ORM** (Node.js) | Migrações seguras e geração de schemas tipados para velocidade de desenvolvimento sem SQL manual vulnerável. |
+| **Hospedagem & Infra** | **Render** | Deploy contínuo simplificado a partir do Git, com separação de ambientes de *Staging* e *Production*. |
