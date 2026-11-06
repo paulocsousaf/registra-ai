@@ -162,7 +162,7 @@ Usuário final autenticado pelo identificador do WhatsApp.
   ────────────────────────
   💰 Saldo do Mês: R$ 1.159,50
   
-  Total de transações ativas: 18
+  Total de transações registradas: 18
   ```
 - **Banco de Dados:**
   - Nenhuma escrita realizada. Operação estritamente de leitura (`SELECT` agregador indexado por `usuario_id` e `data_transacao`).
