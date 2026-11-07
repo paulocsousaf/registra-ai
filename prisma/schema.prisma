@@ -1,0 +1,35 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Usuario {
+  id            String      @id @default(uuid()) @db.Uuid
+  telefone      String      @unique @db.VarChar(20)
+  telefone_hash String      @db.Char(64)
+  criado_em     DateTime    @default(now()) @db.Timestamptz
+  ultimo_acesso DateTime    @default(now()) @db.Timestamptz
+  transacoes    Transacao[]
+
+  @@map("usuarios")
+}
+
+model Transacao {
+  id             String    @id @default(uuid()) @db.Uuid
+  usuario_id     String    @db.Uuid
+  tipo           String    @db.VarChar(10) // 'DESPESA' ou 'RECEITA'
+  valor          Decimal   @db.Decimal(10, 2)
+  descricao      String    @db.VarChar(150)
+  categoria      String    @db.VarChar(50)
+  data_transacao DateTime  @default(now()) @db.Timestamptz
+  deletado_em    DateTime? @db.Timestamptz
+
+  usuario Usuario @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([usuario_id, data_transacao])
+  @@map("transacoes")
+}
