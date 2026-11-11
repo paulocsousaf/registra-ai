@@ -3,6 +3,8 @@ import {
   parseTransactionMessage,
   formatCurrencyBRL,
   formatTransactionConfirmation,
+  formatUndoConfirmation,
+  isUndoCommand,
   TransactionParseError,
 } from './parser.js';
 
@@ -179,5 +181,52 @@ describe('Formatação de Saída — RF-01', () => {
         '💡 Digite "desfazer" se registrou por engano.',
       ].join('\n')
     );
+  });
+});
+
+describe('isUndoCommand & formatUndoConfirmation — RF-03', () => {
+  describe('isUndoCommand — Cenários de Sucesso', () => {
+    it.each(['desfazer', 'apagar', 'cancelar', 'excluir', 'voltar'])(
+      'deve reconhecer a palavra exata "%s" em minúsculas',
+      (cmd) => {
+        expect(isUndoCommand(cmd)).toBe(true);
+      }
+    );
+
+    it.each(['DESFAZER', 'Apagar', '  Cancelar  ', 'EXCLUIR', 'Voltar'])(
+      'deve reconhecer "%s" de forma case-insensitive e ignorando espaços nas extremidades',
+      (cmd) => {
+        expect(isUndoCommand(cmd)).toBe(true);
+      }
+    );
+  });
+
+  describe('isUndoCommand — Cenários de Falha', () => {
+    it('deve rejeitar frases compostas ou variações que não sejam a palavra exata', () => {
+      expect(isUndoCommand('desfazer ultimo')).toBe(false);
+      expect(isUndoCommand('apagar lançamento')).toBe(false);
+      expect(isUndoCommand('almoço 35')).toBe(false);
+      expect(isUndoCommand('quero cancelar')).toBe(false);
+    });
+
+    it('deve rejeitar strings vazias ou maiores que 30 caracteres', () => {
+      expect(isUndoCommand('')).toBe(false);
+      expect(isUndoCommand('   ')).toBe(false);
+      expect(isUndoCommand('a'.repeat(31))).toBe(false);
+    });
+  });
+
+  describe('formatUndoConfirmation', () => {
+    it('deve capitalizar a primeira letra da descrição e formatar o valor em BRL', () => {
+      const msg = formatUndoConfirmation('almoço', 35);
+      expect(msg).toBe(
+        [
+          '🗑️ Lançamento desfeito com sucesso!',
+          '• Removido: Almoço (R$ 35,00)',
+          '',
+          'Seu saldo foi recalculado automaticamente.',
+        ].join('\n')
+      );
+    });
   });
 });

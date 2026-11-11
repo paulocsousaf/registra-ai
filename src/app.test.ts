@@ -16,12 +16,15 @@ vi.mock('./services/user.service.js', () => {
 // Mock do transactionService para testes de integração (sem banco real)
 vi.mock('./services/transaction.service.js', () => {
   const mockCreate = vi.fn();
+  const mockUndoLast = vi.fn();
   return {
     transactionService: {
       create: mockCreate,
+      undoLast: mockUndoLast,
     },
     TransactionService: vi.fn(),
     __mockCreate: mockCreate,
+    __mockUndoLast: mockUndoLast,
   };
 });
 
@@ -31,6 +34,7 @@ import { transactionService } from './services/transaction.service.js';
 
 const mockFindOrCreate = userService.findOrCreateByPhone as ReturnType<typeof vi.fn>;
 const mockCreateTransaction = transactionService.create as ReturnType<typeof vi.fn>;
+const mockUndoLastTransaction = transactionService.undoLast as ReturnType<typeof vi.fn>;
 
 describe('Fastify Base Application', () => {
   it('GET /health deve retornar status 200 com ok', async () => {
@@ -428,5 +432,96 @@ describe('POST /webhook — RF-01: Registro Imediato de Transação', () => {
 
     // Garante que o banco foi acionado apenas uma vez
     expect(mockCreateTransaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('POST /webhook — RF-03: Desfazer / Exclusão do Último Lançamento', () => {
+  const existingUser = {
+    id: 'user-uuid-rf03',
+    telefone: '5586999998888',
+    telefone_hash: 'hash123',
+    criado_em: new Date(),
+    ultimo_acesso: new Date(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFindOrCreate.mockResolvedValue({
+      user: existingUser,
+      isNew: false,
+    });
+  });
+
+  it('Caminho Feliz: deve desfazer a última transação elegível (< 30 min) e retornar confirmação com descrição capitalizada (BDD RF-03)', async () => {
+    const undoneTx = {
+      id: 'tx-uuid-undo-1',
+      usuario_id: existingUser.id,
+      tipo: 'DESPESA',
+      valor: 350,
+      descricao: 'almoço',
+      categoria: 'Alimentação',
+      data_transacao: new Date(Date.now() - 2 * 60 * 1000),
+      deletado_em: new Date(),
+    };
+    mockUndoLastTransaction.mockResolvedValue(undoneTx);
+
+    const app = buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/webhook',
+      payload: {
+        senderPhone: '5586999998888@s.whatsapp.net',
+        text: 'desfazer',
+        messageId: 'msg-rf03-happy-1',
+        timestamp: 1730937600,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+
+    expect(body.received).toBe(true);
+    expect(body.userId).toBe(existingUser.id);
+    expect(body.isNew).toBe(false);
+    expect(body.undone).toBe(true);
+    expect(body.transaction.id).toBe('tx-uuid-undo-1');
+    expect(mockUndoLastTransaction).toHaveBeenCalledWith(existingUser.id);
+    expect(mockCreateTransaction).not.toHaveBeenCalled();
+    expect(body.message).toBe(
+      [
+        '🗑️ Lançamento desfeito com sucesso!',
+        '• Removido: Almoço (R$ 350,00)',
+        '',
+        'Seu saldo foi recalculado automaticamente.',
+      ].join('\n')
+    );
+  });
+
+  it('Caminho de Falha: deve retornar undone=false e aviso amigável quando não há transação recente (< 30 min) (BDD RF-03)', async () => {
+    mockUndoLastTransaction.mockResolvedValue(null);
+
+    const app = buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/webhook',
+      payload: {
+        senderPhone: '5586999998888@s.whatsapp.net',
+        text: 'desfazer',
+        messageId: 'msg-rf03-fail-1',
+        timestamp: 1730937600,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+
+    expect(body.received).toBe(true);
+    expect(body.undone).toBe(false);
+    expect(body.transaction).toBeUndefined();
+    expect(mockUndoLastTransaction).toHaveBeenCalledWith(existingUser.id);
+    expect(mockCreateTransaction).not.toHaveBeenCalled();
+    expect(body.message).toBe(
+      '⚠️ Nenhuma transação recente encontrada para desfazer (limite de 30 minutos). Suas transações permanecem salvas.'
+    );
   });
 });

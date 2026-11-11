@@ -315,6 +315,31 @@ export function parseTransactionMessage(rawText: string): ParsedTransaction {
   };
 }
 
+const MAX_UNDO_COMMAND_LENGTH = 30;
+const UNDO_COMMANDS = new Set(['desfazer', 'apagar', 'cancelar', 'excluir', 'voltar']);
+
+export const UNDO_NOT_FOUND_MESSAGE =
+  '⚠️ Nenhuma transação recente encontrada para desfazer (limite de 30 minutos). Suas transações permanecem salvas.';
+
+/**
+ * Verifica se o texto recebido corresponde exatamente a um comando de cancelamento/desfazer (RF-03).
+ *
+ * - Valores aceitos (case-insensitive): "desfazer", "apagar", "cancelar", "excluir", "voltar"
+ * - Limite máximo: 30 caracteres
+ */
+export function isUndoCommand(rawText: string): boolean {
+  if (typeof rawText !== 'string') {
+    return false;
+  }
+
+  const trimmed = rawText.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_UNDO_COMMAND_LENGTH) {
+    return false;
+  }
+
+  return UNDO_COMMANDS.has(trimmed.toLowerCase());
+}
+
 /**
  * Formata um valor numérico no padrão contábil brasileiro (ex: "R$ 35,00", "R$ 1.500,50").
  */
@@ -340,5 +365,25 @@ export function formatTransactionConfirmation(tx: ParsedTransaction): string {
     `• Categoria: ${tx.categoria}`,
     '',
     '💡 Digite "desfazer" se registrou por engano.',
+  ].join('\n');
+}
+
+/**
+ * Formata a mensagem de confirmação de exclusão do último lançamento conforme especificação do RF-03.
+ * Capitaliza a primeira letra da descrição.
+ */
+export function formatUndoConfirmation(descricao: string, valor: number): string {
+  const trimmedDesc = descricao.trim();
+  const capitalizedDesc =
+    trimmedDesc.length > 0
+      ? trimmedDesc.charAt(0).toUpperCase() + trimmedDesc.slice(1)
+      : trimmedDesc;
+  const valorFormatado = formatCurrencyBRL(valor);
+
+  return [
+    '🗑️ Lançamento desfeito com sucesso!',
+    `• Removido: ${capitalizedDesc} (${valorFormatado})`,
+    '',
+    'Seu saldo foi recalculado automaticamente.',
   ].join('\n');
 }

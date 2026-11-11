@@ -4,8 +4,11 @@ import { userService } from '../services/user.service.js';
 import { transactionService } from '../services/transaction.service.js';
 import {
   formatTransactionConfirmation,
+  formatUndoConfirmation,
+  isUndoCommand,
   parseTransactionMessage,
   TransactionParseError,
+  UNDO_NOT_FOUND_MESSAGE,
 } from '../utils/parser.js';
 
 const DEDUP_WINDOW_MS = 60_000;
@@ -73,6 +76,36 @@ export async function webhookHandler(
     // RN-04.3: Flag de boas-vindas para primeiro contato
     if (isNew) {
       response.welcomeMessage = WELCOME_MESSAGE;
+    }
+
+    // RF-03: Comando de desfazer / exclusão do último lançamento
+    if (isUndoCommand(text)) {
+      const undoneTx = await transactionService.undoLast(user.id);
+      dedupMap.set(messageId, now);
+
+      if (undoneTx) {
+        response.undone = true;
+        response.transaction = undoneTx;
+        response.message = formatUndoConfirmation(
+          undoneTx.descricao,
+          Number(undoneTx.valor)
+        );
+
+        request.log.info(
+          { userId: user.id, isNew, maskedPhone, messageId, undone: true },
+          `Última transação desfeita para o usuário ${maskedPhone}`
+        );
+      } else {
+        response.undone = false;
+        response.message = UNDO_NOT_FOUND_MESSAGE;
+
+        request.log.info(
+          { userId: user.id, isNew, maskedPhone, messageId, undone: false },
+          `Nenhuma transação elegível para desfazer para o usuário ${maskedPhone}`
+        );
+      }
+
+      return reply.status(200).send(response);
     }
 
     // RF-01: Parsing do texto e persistência da transação

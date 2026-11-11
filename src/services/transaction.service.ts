@@ -18,6 +18,7 @@ export interface ITransactionService {
 
 const MIN_VALUE = 0.01;
 const MAX_VALUE = 999999.99;
+const UNDO_WINDOW_MS = 30 * 60 * 1000; // 30 minutos em milissegundos
 
 export class TransactionService implements ITransactionService {
   private prisma: PrismaClient;
@@ -69,9 +70,48 @@ export class TransactionService implements ITransactionService {
     });
   }
 
-  async undoLast(_usuarioId: string): Promise<Transacao | null> {
-    // Stub: Lógica de soft delete (janela de 30min) será implementada no RF-03
-    throw new Error('Método não implementado.');
+  /**
+   * Reverte (Soft Delete) a última transação ativa do usuário se criada há menos de 30 minutos (RF-03).
+   *
+   * - RN-03.1: Seleciona estritamente a última transação ativa (deletado_em IS NULL) do usuario_id
+   * - RN-03.2: Permite apenas se criada dentro da janela de tolerância de 30 minutos
+   * - RN-03.3: Executa soft delete preenchendo deletado_em com a data/hora atual
+   */
+  async undoLast(usuarioId: string): Promise<Transacao | null> {
+    if (!usuarioId || typeof usuarioId !== 'string' || !usuarioId.trim()) {
+      throw new Error('usuarioId é obrigatório.');
+    }
+
+    const lastTransaction = await this.prisma.transacao.findFirst({
+      where: {
+        usuario_id: usuarioId,
+        deletado_em: null,
+      },
+      orderBy: {
+        data_transacao: 'desc',
+      },
+    });
+
+    if (!lastTransaction) {
+      return null;
+    }
+
+    const now = new Date();
+    const elapsedMs = now.getTime() - new Date(lastTransaction.data_transacao).getTime();
+
+    if (elapsedMs > UNDO_WINDOW_MS) {
+      return null;
+    }
+
+    return this.prisma.transacao.update({
+      where: {
+        id: lastTransaction.id,
+        usuario_id: usuarioId,
+      },
+      data: {
+        deletado_em: now,
+      },
+    });
   }
 
   async getMonthSummary(_usuarioId: string, _referenceDate: Date): Promise<unknown> {
