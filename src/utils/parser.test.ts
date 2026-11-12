@@ -5,6 +5,9 @@ import {
   formatTransactionConfirmation,
   formatUndoConfirmation,
   isUndoCommand,
+  isSummaryCommand,
+  getMonthReferenceName,
+  formatMonthSummary,
   TransactionParseError,
 } from './parser.js';
 
@@ -226,6 +229,124 @@ describe('isUndoCommand & formatUndoConfirmation — RF-03', () => {
           '',
           'Seu saldo foi recalculado automaticamente.',
         ].join('\n')
+      );
+    });
+  });
+
+  describe('isSummaryCommand — RF-02', () => {
+    describe('Cenários de Sucesso', () => {
+      it('deve reconhecer palavras-chave exatas (RN-02)', () => {
+        const keywords = ['resumo', 'saldo', 'relatorio', 'gastos', 'extrato', 'mes'];
+        for (const kw of keywords) {
+          expect(isSummaryCommand(kw)).toBe(true);
+        }
+      });
+
+      it('deve reconhecer palavras com acentuação ("relatório", "mês")', () => {
+        expect(isSummaryCommand('relatório')).toBe(true);
+        expect(isSummaryCommand('mês')).toBe(true);
+      });
+
+      it('deve ser insensível a maiúsculas e minúsculas', () => {
+        expect(isSummaryCommand('RESUMO')).toBe(true);
+        expect(isSummaryCommand('Saldo')).toBe(true);
+        expect(isSummaryCommand('ExTrAtO')).toBe(true);
+        expect(isSummaryCommand('MÊS')).toBe(true);
+      });
+
+      it('deve ignorar espaços em branco nas extremidades', () => {
+        expect(isSummaryCommand('  saldo  ')).toBe(true);
+        expect(isSummaryCommand('\tresumo\n')).toBe(true);
+      });
+    });
+
+    describe('Cenários de Rejeição', () => {
+      it('deve rejeitar frases que contenham valor ou não sejam o comando exato', () => {
+        expect(isSummaryCommand('resumo 50')).toBe(false);
+        expect(isSummaryCommand('saldo 100')).toBe(false);
+        expect(isSummaryCommand('gastei 50 no mercado')).toBe(false);
+        expect(isSummaryCommand('almoço 35')).toBe(false);
+        expect(isSummaryCommand('quero ver meu saldo')).toBe(false);
+      });
+
+      it('deve rejeitar strings vazias ou maiores que 50 caracteres', () => {
+        expect(isSummaryCommand('')).toBe(false);
+        expect(isSummaryCommand('   ')).toBe(false);
+        expect(isSummaryCommand('a'.repeat(51))).toBe(false);
+      });
+    });
+  });
+
+  describe('formatCurrencyBRL', () => {
+    it('deve formatar valores positivos, zeros e negativos corretamente', () => {
+      expect(formatCurrencyBRL(0)).toBe('R$ 0,00');
+      expect(formatCurrencyBRL(35)).toBe('R$ 35,00');
+      expect(formatCurrencyBRL(1250.5)).toBe('R$ 1.250,50');
+      expect(formatCurrencyBRL(-150)).toBe('-R$ 150,00');
+      expect(formatCurrencyBRL(-0.05)).toBe('-R$ 0,05');
+    });
+  });
+
+  describe('getMonthReferenceName', () => {
+    it('deve formatar mês e ano corretamente no padrão capitalizado', () => {
+      const dateOutubro = new Date('2026-10-15T15:00:00Z');
+      expect(getMonthReferenceName(dateOutubro)).toBe('Outubro/2026');
+
+      const dateDezembro = new Date('2026-12-05T12:00:00Z');
+      expect(getMonthReferenceName(dateDezembro)).toBe('Dezembro/2026');
+    });
+  });
+
+  describe('formatMonthSummary', () => {
+    it('deve formatar layout completo quando há movimentações (BDD RF-02)', () => {
+      const summary = {
+        mesReferencia: 'Outubro/2026',
+        totalReceitas: 2500,
+        totalDespesas: 1340.5,
+        saldo: 1159.5,
+        totalTransacoes: 18,
+      };
+
+      const msg = formatMonthSummary(summary);
+      expect(msg).toBe(
+        [
+          '📊 Resumo Financeiro - Outubro/2026',
+          '',
+          '🟢 Total de Receitas: R$ 2.500,00',
+          '🔴 Total de Despesas: R$ 1.340,50',
+          '────────────────────────',
+          '💰 Saldo do Mês: R$ 1.159,50',
+          '',
+          'Total de transações registradas: 18',
+        ].join('\n')
+      );
+    });
+
+    it('deve formatar saldo negativo quando despesas superam receitas', () => {
+      const summary = {
+        mesReferencia: 'Novembro/2026',
+        totalReceitas: 500,
+        totalDespesas: 750,
+        saldo: -250,
+        totalTransacoes: 3,
+      };
+
+      const msg = formatMonthSummary(summary);
+      expect(msg).toContain('💰 Saldo do Mês: -R$ 250,00');
+    });
+
+    it('deve formatar aviso amigável quando não há transações no período (Zero-State BDD RF-02)', () => {
+      const summary = {
+        mesReferencia: 'Outubro/2026',
+        totalReceitas: 0,
+        totalDespesas: 0,
+        saldo: 0,
+        totalTransacoes: 0,
+      };
+
+      const msg = formatMonthSummary(summary);
+      expect(msg).toBe(
+        "📊 Você ainda não tem lançamentos registrados em Outubro/2026. Envie algo como 'mercado 80' para começar!"
       );
     });
   });

@@ -7,6 +7,7 @@ function createMockPrisma() {
       create: vi.fn(),
       findFirst: vi.fn(),
       update: vi.fn(),
+      findMany: vi.fn(),
     },
   } as any;
 }
@@ -226,6 +227,99 @@ describe('TransactionService — RF-01', () => {
     it('Cenário de Falha (Validação): deve rejeitar quando usuarioId está vazio', async () => {
       await expect(service.undoLast('')).rejects.toThrow('usuarioId é obrigatório');
       expect(mockPrisma.transacao.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getMonthSummary — RF-02', () => {
+    const referenceDate = new Date('2026-10-15T15:00:00Z');
+
+    it('Cenário de Sucesso: deve consolidar receitas, despesas e saldo líquido com precisão (BDD RF-02)', async () => {
+      const fakeTransactions = [
+        { tipo: 'RECEITA', valor: 2000 },
+        { tipo: 'RECEITA', valor: 500 },
+        { tipo: 'DESPESA', valor: 1000 },
+        { tipo: 'DESPESA', valor: 340.5 },
+      ];
+
+      mockPrisma.transacao.findMany.mockResolvedValue(fakeTransactions);
+
+      const summary = await service.getMonthSummary('user-uuid-1', referenceDate);
+
+      expect(mockPrisma.transacao.findMany).toHaveBeenCalledWith({
+        where: {
+          usuario_id: 'user-uuid-1',
+          deletado_em: null,
+          data_transacao: {
+            gte: new Date('2026-10-01T00:00:00.000-03:00'),
+            lt: new Date('2026-11-01T00:00:00.000-03:00'),
+          },
+        },
+        select: {
+          tipo: true,
+          valor: true,
+        },
+      });
+
+      expect(summary).toEqual({
+        mesReferencia: 'Outubro/2026',
+        totalReceitas: 2500,
+        totalDespesas: 1340.5,
+        saldo: 1159.5,
+        totalTransacoes: 4,
+      });
+    });
+
+    it('Determinismo nos Cálculos: deve somar centavos com exatidão matemática sem divergência de float', async () => {
+      const centTransactions = [
+        { tipo: 'RECEITA', valor: 0.1 },
+        { tipo: 'RECEITA', valor: 0.2 },
+        { tipo: 'DESPESA', valor: 0.05 },
+        { tipo: 'DESPESA', valor: 0.01 },
+      ];
+
+      mockPrisma.transacao.findMany.mockResolvedValue(centTransactions);
+
+      const summary = await service.getMonthSummary('user-uuid-1', referenceDate);
+
+      expect(summary.totalReceitas).toBe(0.3);
+      expect(summary.totalDespesas).toBe(0.06);
+      expect(summary.saldo).toBe(0.24);
+      expect(summary.totalTransacoes).toBe(4);
+    });
+
+    it('Cenário de Saldo Negativo: deve calcular saldo negativo quando despesas superam receitas', async () => {
+      const negativeTransactions = [
+        { tipo: 'RECEITA', valor: 200 },
+        { tipo: 'DESPESA', valor: 550 },
+      ];
+
+      mockPrisma.transacao.findMany.mockResolvedValue(negativeTransactions);
+
+      const summary = await service.getMonthSummary('user-uuid-1', referenceDate);
+
+      expect(summary.totalReceitas).toBe(200);
+      expect(summary.totalDespesas).toBe(550);
+      expect(summary.saldo).toBe(-350);
+      expect(summary.totalTransacoes).toBe(2);
+    });
+
+    it('Cenário de Borda (Ausência de Movimentação - RN-02.4): deve retornar zeros quando não há transações no mês', async () => {
+      mockPrisma.transacao.findMany.mockResolvedValue([]);
+
+      const summary = await service.getMonthSummary('user-uuid-1', referenceDate);
+
+      expect(summary).toEqual({
+        mesReferencia: 'Outubro/2026',
+        totalReceitas: 0,
+        totalDespesas: 0,
+        saldo: 0,
+        totalTransacoes: 0,
+      });
+    });
+
+    it('Cenário de Falha (Validação): deve rejeitar quando usuarioId está vazio', async () => {
+      await expect(service.getMonthSummary('')).rejects.toThrow('usuarioId é obrigatório');
+      expect(mockPrisma.transacao.findMany).not.toHaveBeenCalled();
     });
   });
 });

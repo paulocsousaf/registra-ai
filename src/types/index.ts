@@ -15,3 +15,11 @@ export interface WebhookMessagePayload {
   text: string;
   timestamp: number;
 }
+
+export interface MonthSummary {
+  mesReferencia: string;
+  totalReceitas: number;
+  totalDespesas: number;
+  saldo: number;
+  totalTransacoes: number;
+}

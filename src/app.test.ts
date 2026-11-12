@@ -17,14 +17,17 @@ vi.mock('./services/user.service.js', () => {
 vi.mock('./services/transaction.service.js', () => {
   const mockCreate = vi.fn();
   const mockUndoLast = vi.fn();
+  const mockGetMonthSummary = vi.fn();
   return {
     transactionService: {
       create: mockCreate,
       undoLast: mockUndoLast,
+      getMonthSummary: mockGetMonthSummary,
     },
     TransactionService: vi.fn(),
     __mockCreate: mockCreate,
     __mockUndoLast: mockUndoLast,
+    __mockGetMonthSummary: mockGetMonthSummary,
   };
 });
 
@@ -35,6 +38,7 @@ import { transactionService } from './services/transaction.service.js';
 const mockFindOrCreate = userService.findOrCreateByPhone as ReturnType<typeof vi.fn>;
 const mockCreateTransaction = transactionService.create as ReturnType<typeof vi.fn>;
 const mockUndoLastTransaction = transactionService.undoLast as ReturnType<typeof vi.fn>;
+const mockGetMonthSummary = transactionService.getMonthSummary as ReturnType<typeof vi.fn>;
 
 describe('Fastify Base Application', () => {
   it('GET /health deve retornar status 200 com ok', async () => {
@@ -523,5 +527,141 @@ describe('POST /webhook — RF-03: Desfazer / Exclusão do Último Lançamento',
     expect(body.message).toBe(
       '⚠️ Nenhuma transação recente encontrada para desfazer (limite de 30 minutos). Suas transações permanecem salvas.'
     );
+  });
+});
+
+describe('POST /webhook — RF-02: Consulta de Resumo / Saldo Consolidado', () => {
+  const existingUser = {
+    id: 'user-uuid-rf02',
+    telefone: '5586999998888',
+    telefone_hash: 'hash123',
+    criado_em: new Date(),
+    ultimo_acesso: new Date(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFindOrCreate.mockResolvedValue({
+      user: existingUser,
+      isNew: false,
+    });
+  });
+
+  it('Caminho Feliz: deve processar comando "resumo" e retornar layout consolidado com totais e saldo (BDD RF-02)', async () => {
+    const fakeSummary = {
+      mesReferencia: 'Outubro/2026',
+      totalReceitas: 2500,
+      totalDespesas: 1340.5,
+      saldo: 1159.5,
+      totalTransacoes: 18,
+    };
+    mockGetMonthSummary.mockResolvedValue(fakeSummary);
+
+    const app = buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/webhook',
+      payload: {
+        senderPhone: '5586999998888@s.whatsapp.net',
+        text: 'resumo',
+        messageId: 'msg-rf02-happy-1',
+        timestamp: 1730937600,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+
+    expect(body.received).toBe(true);
+    expect(body.summary).toBe(true);
+    expect(body.data).toEqual(fakeSummary);
+    expect(mockGetMonthSummary).toHaveBeenCalledWith(existingUser.id);
+    expect(mockCreateTransaction).not.toHaveBeenCalled();
+    expect(mockUndoLastTransaction).not.toHaveBeenCalled();
+    expect(body.message).toBe(
+      [
+        '📊 Resumo Financeiro - Outubro/2026',
+        '',
+        '🟢 Total de Receitas: R$ 2.500,00',
+        '🔴 Total de Despesas: R$ 1.340,50',
+        '────────────────────────',
+        '💰 Saldo do Mês: R$ 1.159,50',
+        '',
+        'Total de transações registradas: 18',
+      ].join('\n')
+    );
+  });
+
+  it('Caminho Zero-State: deve processar comando "saldo" quando usuário não possui transações (BDD RF-02)', async () => {
+    const emptySummary = {
+      mesReferencia: 'Outubro/2026',
+      totalReceitas: 0,
+      totalDespesas: 0,
+      saldo: 0,
+      totalTransacoes: 0,
+    };
+    mockGetMonthSummary.mockResolvedValue(emptySummary);
+
+    const app = buildApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/webhook',
+      payload: {
+        senderPhone: '5586999998888@s.whatsapp.net',
+        text: 'saldo',
+        messageId: 'msg-rf02-empty-1',
+        timestamp: 1730937600,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+
+    expect(body.received).toBe(true);
+    expect(body.summary).toBe(true);
+    expect(body.data.totalTransacoes).toBe(0);
+    expect(mockGetMonthSummary).toHaveBeenCalledWith(existingUser.id);
+    expect(body.message).toBe(
+      "📊 Você ainda não tem lançamentos registrados em Outubro/2026. Envie algo como 'mercado 80' para começar!"
+    );
+  });
+
+  it('Variações de comando: deve aceitar palavras com acento e em caixa alta ("mês", "EXTRATO")', async () => {
+    mockGetMonthSummary.mockResolvedValue({
+      mesReferencia: 'Outubro/2026',
+      totalReceitas: 100,
+      totalDespesas: 50,
+      saldo: 50,
+      totalTransacoes: 2,
+    });
+
+    const app = buildApp();
+
+    const resMes = await app.inject({
+      method: 'POST',
+      url: '/webhook',
+      payload: {
+        senderPhone: '5586999998888@s.whatsapp.net',
+        text: 'mês',
+        messageId: 'msg-rf02-cmd-mes',
+        timestamp: 1730937600,
+      },
+    });
+    expect(resMes.statusCode).toBe(200);
+    expect(JSON.parse(resMes.payload).summary).toBe(true);
+
+    const resExtrato = await app.inject({
+      method: 'POST',
+      url: '/webhook',
+      payload: {
+        senderPhone: '5586999998888@s.whatsapp.net',
+        text: 'EXTRATO',
+        messageId: 'msg-rf02-cmd-extrato',
+        timestamp: 1730937600,
+      },
+    });
+    expect(resExtrato.statusCode).toBe(200);
+    expect(JSON.parse(resExtrato.payload).summary).toBe(true);
+    expect(mockGetMonthSummary).toHaveBeenCalledTimes(2);
   });
 });

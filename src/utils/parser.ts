@@ -1,4 +1,4 @@
-import { CategoriaTransacao, TipoTransacao } from '../types/index.js';
+import { CategoriaTransacao, MonthSummary, TipoTransacao } from '../types/index.js';
 
 export interface ParsedTransaction {
   tipo: TipoTransacao;
@@ -341,13 +341,15 @@ export function isUndoCommand(rawText: string): boolean {
 }
 
 /**
- * Formata um valor numérico no padrão contábil brasileiro (ex: "R$ 35,00", "R$ 1.500,50").
+ * Formata um valor numérico no padrão contábil brasileiro (ex: "R$ 35,00", "R$ 1.500,50", "-R$ 50,00").
  */
 export function formatCurrencyBRL(value: number): string {
-  const fixed = value.toFixed(2);
+  const isNegative = value < 0;
+  const absValue = Math.abs(value);
+  const fixed = absValue.toFixed(2);
   const [intPart, decPart] = fixed.split('.');
   const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-  return `R$ ${formattedInt},${decPart}`;
+  return `${isNegative ? '-' : ''}R$ ${formattedInt},${decPart}`;
 }
 
 /**
@@ -385,5 +387,92 @@ export function formatUndoConfirmation(descricao: string, valor: number): string
     `• Removido: ${capitalizedDesc} (${valorFormatado})`,
     '',
     'Seu saldo foi recalculado automaticamente.',
+  ].join('\n');
+}
+
+const MAX_SUMMARY_COMMAND_LENGTH = 50;
+const SUMMARY_COMMANDS = new Set([
+  'resumo',
+  'saldo',
+  'relatorio',
+  'gastos',
+  'extrato',
+  'mes',
+]);
+
+const MONTH_NAMES_PT = [
+  'Janeiro',
+  'Fevereiro',
+  'Março',
+  'Abril',
+  'Maio',
+  'Junho',
+  'Julho',
+  'Agosto',
+  'Setembro',
+  'Outubro',
+  'Novembro',
+  'Dezembro',
+];
+
+/**
+ * Retorna o nome do mês em português capitalizado seguido pelo ano (ex: "Outubro/2026"),
+ * considerando o fuso horário padrão (America/Sao_Paulo).
+ */
+export function getMonthReferenceName(date: Date = new Date(), timeZone = 'America/Sao_Paulo'): string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: 'numeric',
+  });
+  const parts = formatter.formatToParts(date);
+  const monthNumber = parseInt(parts.find((p) => p.type === 'month')?.value || '1', 10);
+  const yearNumber = parts.find((p) => p.type === 'year')?.value || `${date.getFullYear()}`;
+  const monthName = MONTH_NAMES_PT[monthNumber - 1] || 'Janeiro';
+  return `${monthName}/${yearNumber}`;
+}
+
+/**
+ * Verifica se o texto recebido corresponde a um comando de consulta de resumo / saldo (RF-02).
+ *
+ * - Valores aceitos (case-insensitive, com ou sem acentos):
+ *   "resumo", "saldo", "relatorio", "gastos", "extrato", "mes", "mês"
+ * - Limite máximo: 50 caracteres
+ */
+export function isSummaryCommand(rawText: string): boolean {
+  if (typeof rawText !== 'string') {
+    return false;
+  }
+
+  const trimmed = rawText.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_SUMMARY_COMMAND_LENGTH) {
+    return false;
+  }
+
+  const normalized = normalizeText(trimmed);
+  return SUMMARY_COMMANDS.has(normalized);
+}
+
+/**
+ * Formata a mensagem de resumo financeiro mensal para o WhatsApp conforme especificação do RF-02.
+ */
+export function formatMonthSummary(summary: MonthSummary): string {
+  if (summary.totalTransacoes === 0) {
+    return `📊 Você ainda não tem lançamentos registrados em ${summary.mesReferencia}. Envie algo como 'mercado 80' para começar!`;
+  }
+
+  const receitasFormatadas = formatCurrencyBRL(summary.totalReceitas);
+  const despesasFormatadas = formatCurrencyBRL(summary.totalDespesas);
+  const saldoFormatado = formatCurrencyBRL(summary.saldo);
+
+  return [
+    `📊 Resumo Financeiro - ${summary.mesReferencia}`,
+    '',
+    `🟢 Total de Receitas: ${receitasFormatadas}`,
+    `🔴 Total de Despesas: ${despesasFormatadas}`,
+    '────────────────────────',
+    `💰 Saldo do Mês: ${saldoFormatado}`,
+    '',
+    `Total de transações registradas: ${summary.totalTransacoes}`,
   ].join('\n');
 }

@@ -3,8 +3,10 @@ import { webhookPayloadSchema } from '../schemas/webhook.schema.js';
 import { userService } from '../services/user.service.js';
 import { transactionService } from '../services/transaction.service.js';
 import {
+  formatMonthSummary,
   formatTransactionConfirmation,
   formatUndoConfirmation,
+  isSummaryCommand,
   isUndoCommand,
   parseTransactionMessage,
   TransactionParseError,
@@ -104,6 +106,23 @@ export async function webhookHandler(
           `Nenhuma transação elegível para desfazer para o usuário ${maskedPhone}`
         );
       }
+
+      return reply.status(200).send(response);
+    }
+
+    // RF-02: Comando de consulta de resumo / saldo consolidado
+    if (isSummaryCommand(text)) {
+      const summary = await transactionService.getMonthSummary(user.id);
+      dedupMap.set(messageId, now);
+
+      response.summary = true;
+      response.data = summary;
+      response.message = formatMonthSummary(summary);
+
+      request.log.info(
+        { userId: user.id, isNew, maskedPhone, messageId, summary: true },
+        `Resumo mensal gerado para o usuário ${maskedPhone}`
+      );
 
       return reply.status(200).send(response);
     }

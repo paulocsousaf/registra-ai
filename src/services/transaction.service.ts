@@ -1,6 +1,7 @@
 import { PrismaClient, Transacao } from '@prisma/client';
 import { prisma as defaultPrisma } from '../lib/prisma.js';
-import { CategoriaTransacao, TipoTransacao } from '../types/index.js';
+import { CategoriaTransacao, MonthSummary, TipoTransacao } from '../types/index.js';
+import { getMonthReferenceName } from '../utils/parser.js';
 
 export interface CreateTransactionDTO {
   usuarioId: string;
@@ -13,7 +14,7 @@ export interface CreateTransactionDTO {
 export interface ITransactionService {
   create(data: CreateTransactionDTO): Promise<Transacao>;
   undoLast(usuarioId: string): Promise<Transacao | null>;
-  getMonthSummary(usuarioId: string, referenceDate: Date): Promise<unknown>;
+  getMonthSummary(usuarioId: string, referenceDate?: Date): Promise<MonthSummary>;
 }
 
 const MIN_VALUE = 0.01;
@@ -114,9 +115,86 @@ export class TransactionService implements ITransactionService {
     });
   }
 
-  async getMonthSummary(_usuarioId: string, _referenceDate: Date): Promise<unknown> {
-    // Stub: Lógica de consolidação e saldo mensal será implementada no RF-02
-    throw new Error('Método não implementado.');
+  /**
+   * Consolida as receitas, despesas e saldo do mês civil vigente do usuário (RF-02).
+   *
+   * - RN-02.1: Escopo do primeiro dia do mês civil vigente até o fim do mês em America/Sao_Paulo
+   * - RN-02.2: Fórmula determinística de consolidação:
+   *     Total_Receitas = sum(valor) onde tipo = 'RECEITA' e deletado_em IS NULL
+   *     Total_Despesas = sum(valor) onde tipo = 'DESPESA' e deletado_em IS NULL
+   *     Saldo_Mes = Total_Receitas - Total_Despesas
+   * - RN-02.4: Caso não existam lançamentos, retorna valores zerados (R$ 0,00)
+   * - Regra 6.3: Isolamento rigoroso pelo usuario_id
+   * - Regra 6.4: Cálculos matemáticos determinísticos sem uso de LLM
+   */
+  async getMonthSummary(usuarioId: string, referenceDate: Date = new Date()): Promise<MonthSummary> {
+    if (!usuarioId || typeof usuarioId !== 'string' || !usuarioId.trim()) {
+      throw new Error('usuarioId é obrigatório.');
+    }
+
+    // Calcula os limites temporais do mês civil no fuso America/Sao_Paulo
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: 'numeric',
+    });
+    const parts = formatter.formatToParts(referenceDate);
+    const year = parseInt(parts.find((p) => p.type === 'year')!.value, 10);
+    const month = parseInt(parts.find((p) => p.type === 'month')!.value, 10);
+
+    const monthStr = String(month).padStart(2, '0');
+    const startOfMonth = new Date(`${year}-${monthStr}-01T00:00:00.000-03:00`);
+
+    let nextYear = year;
+    let nextMonth = month + 1;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      nextYear += 1;
+    }
+    const nextMonthStr = String(nextMonth).padStart(2, '0');
+    const startOfNextMonth = new Date(`${nextYear}-${nextMonthStr}-01T00:00:00.000-03:00`);
+
+    // Consulta transações ativas do usuário dentro da janela do mês corrente
+    const transactions = await this.prisma.transacao.findMany({
+      where: {
+        usuario_id: usuarioId,
+        deletado_em: null,
+        data_transacao: {
+          gte: startOfMonth,
+          lt: startOfNextMonth,
+        },
+      },
+      select: {
+        tipo: true,
+        valor: true,
+      },
+    });
+
+    // Agregação determinística em centavos inteiros para evitar imprecisões de ponto flutuante
+    let totalReceitasCents = 0;
+    let totalDespesasCents = 0;
+
+    for (const tx of transactions) {
+      const cents = Math.round(Number(tx.valor) * 100);
+      if (tx.tipo === 'RECEITA') {
+        totalReceitasCents += cents;
+      } else if (tx.tipo === 'DESPESA') {
+        totalDespesasCents += cents;
+      }
+    }
+
+    const totalReceitas = totalReceitasCents / 100;
+    const totalDespesas = totalDespesasCents / 100;
+    const saldo = (totalReceitasCents - totalDespesasCents) / 100;
+    const mesReferencia = getMonthReferenceName(referenceDate);
+
+    return {
+      mesReferencia,
+      totalReceitas,
+      totalDespesas,
+      saldo,
+      totalTransacoes: transactions.length,
+    };
   }
 }
 
